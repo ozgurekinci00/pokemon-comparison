@@ -1,13 +1,8 @@
 # React + Tailwind CSS Project
 
-A modern React application built with TypeScript and Tailwind CSS.
+Real-time P2P Pokemon battle voting app with WebRTC for WebSocket-like behaviour and PeerJS for initial signaling server.
 
-## Features
-
-- ⚛️ React 19 with TypeScript
-- 🎨 Tailwind CSS for styling
-- 📱 Responsive design
-- 🚀 Fast development with hot reload
+It's deployed via Vercel for testing convenience: https://pokemon-comparison-ten.vercel.app/
 
 ## Getting Started
 
