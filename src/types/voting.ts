@@ -6,7 +6,6 @@ export interface Vote {
   pokemonName: string;
   battleId: string;
   timestamp: number;
-  sessionId: string; // For tracking across browser tabs
 }
 
 export interface VoteData {
@@ -40,15 +39,13 @@ export interface BattleState {
 
 export interface User {
   id: string;
-  sessionId: string;
   hasVoted: boolean;
   voteTimestamp?: number;
-  lastActiveTab: string;
 }
 
 export type VotingStatus = 'idle' | 'voting' | 'voted' | 'disabled';
 
 export interface VotingAction {
-  type: 'CAST_VOTE' | 'RECEIVE_VOTE' | 'START_BATTLE' | 'RESET_BATTLE' | 'SET_USER_VOTE_STATUS';
+  type: 'CAST_VOTE' | 'RECEIVE_VOTE' | 'START_BATTLE' | 'RESET_BATTLE' | 'SET_USER_VOTE_STATUS' | 'SYNC_VOTES';
   payload?: any;
 }

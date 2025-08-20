@@ -1,6 +1,7 @@
 // P2P WebRTC service for serverless real-time communication
 
 import Peer, { DataConnection } from 'peerjs';
+import { appConfig } from '../config/environment';
 import {
   P2PMessage,
   P2PVoteMessage,
@@ -26,6 +27,8 @@ class P2PService {
   private eventHandlers: Partial<P2PEventHandlers> = {};
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private discoveryTimeout: NodeJS.Timeout | null = null;
+  private isIntentionalDisconnect: boolean = false;
+  private getCurrentStateCallback: (() => any[]) | null = null;
   
   private readonly config: P2PServiceConfig = {
     maxConnections: 8,
@@ -39,12 +42,15 @@ class P2PService {
   /**
    * Initialize P2P service with deterministic room-based discovery
    */
-  async initialize(pokemon1: string, pokemon2: string): Promise<void> {
+  async initialize(pokemon1Index: number, pokemon2Index: number): Promise<void> {
     try {
       this.updateStatus('discovering');
       
+      // Reset intentional disconnect flag for new session
+      this.isIntentionalDisconnect = false;
+      
       // Generate deterministic room ID
-      this.state.roomId = this.generateRoomId(pokemon1, pokemon2);
+      this.state.roomId = this.generateRoomId(pokemon1Index, pokemon2Index);
       
       // Create unique peer ID for this session
       this.state.peerId = this.generatePeerId(this.state.roomId);
@@ -89,7 +95,7 @@ class P2PService {
       battleId: this.state.roomId
     };
 
-    console.log(`📤 Broadcasting vote:`, voteMessage.payload);
+    // Vote broadcasted to peers
     
     // Only broadcast if we have actual P2P connections
     if (this.state.connectedPeers.size > 0) {
@@ -113,8 +119,35 @@ class P2PService {
       battleId: this.state.roomId
     };
 
-    console.log(`🔄 Requesting sync from peers...`);
+    console.log(`🔄 Requesting sync from ${this.state.connectedPeers.size} peers...`);
     await this.broadcastMessage(syncRequest);
+  }
+
+  /**
+   * Send current votes to a specific peer (for newly connected peers)
+   */
+  async sendStateToPeer(peerId: string, votes: any[]): Promise<void> {
+    const peerConnection = this.state.connectedPeers.get(peerId);
+    if (!peerConnection) {
+      console.warn(`Cannot send state to ${peerId}: peer not found`);
+      return;
+    }
+
+    const syncResponse: P2PSyncMessage = {
+      type: 'SYNC_RESPONSE',
+      payload: { votes },
+      timestamp: Date.now(),
+      peerId: this.state.peerId,
+      messageId: this.generateMessageId(),
+      battleId: this.state.roomId
+    };
+
+    try {
+      peerConnection.connection.send(syncResponse);
+
+    } catch (error) {
+      console.error(`Failed to send state to peer ${peerId}:`, error);
+    }
   }
 
   /**
@@ -123,12 +156,17 @@ class P2PService {
   disconnect(): void {
     console.log(`🔌 Disconnecting P2P service...`);
     
+    // Set flag to prevent reconnection attempts
+    this.isIntentionalDisconnect = true;
+    
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
     
     if (this.discoveryTimeout) {
       clearTimeout(this.discoveryTimeout);
+      this.discoveryTimeout = null;
     }
 
     // Close all peer connections
@@ -142,6 +180,7 @@ class P2PService {
     }
 
     this.state.connectedPeers.clear();
+    this.state.connectionAttempts = 0; // Reset connection attempts
     this.updateStatus('offline');
   }
 
@@ -180,6 +219,13 @@ class P2PService {
   }
 
   /**
+   * Set callback to get current state for sync requests
+   */
+  setCurrentStateCallback(callback: () => any[]): void {
+    this.getCurrentStateCallback = callback;
+  }
+
+  /**
    * Private implementation methods
    */
   private async createPeer(): Promise<void> {
@@ -192,8 +238,8 @@ class P2PService {
           console.log(`🔄 Creating peer with ID: ${this.state.peerId} (attempt ${attempts + 1}/${maxAttempts})`);
           
           // Use PeerJS cloud with comprehensive STUN/TURN configuration for cross-network connectivity
-          this.peer = new Peer(this.state.peerId, {
-            debug: 1, // Reduce debug output for cleaner logs
+          const peerOptions: any = {
+            debug: 0, // Disable debug output for cleaner logs
             config: {
               iceServers: [
                 // Google STUN servers
@@ -219,7 +265,20 @@ class P2PService {
             },
             // Increase connection timeout for cross-network scenarios
             pingInterval: 5000
-          });
+          };
+
+          // Add custom PeerJS server configuration if provided
+          if (appConfig.peerjs.host) {
+            peerOptions.host = appConfig.peerjs.host;
+          }
+          if (appConfig.peerjs.port) {
+            peerOptions.port = appConfig.peerjs.port;
+          }
+          if (appConfig.peerjs.path) {
+            peerOptions.path = appConfig.peerjs.path;
+          }
+
+          this.peer = new Peer(this.state.peerId, peerOptions);
 
           await this.setupPeerEvents(resolve, reject);
           return; // Success, exit the retry loop
@@ -264,7 +323,7 @@ class P2PService {
     });
 
     this.peer.on('error', (error) => {
-      console.error('❌ Peer error:', error);
+      // console.error('❌ Peer error:', error);
       clearTimeout(timeout);
       this.handlePeerError(error);
       reject(error);
@@ -283,7 +342,6 @@ class P2PService {
 
   private async discoverPeers(): Promise<void> {
     console.log(`🔍 Discovering peers in room: ${this.state.roomId}...`);
-    console.log(`🆔 My peer ID: ${this.state.peerId}`);
     
     const discoveryPromises: Promise<void>[] = [];
     
@@ -297,8 +355,6 @@ class P2PService {
       }
     }
 
-    console.log(`🔄 Attempting to discover ${discoveryPromises.length} potential peers...`);
-
     // Extended discovery timeout for cross-network connections
     const extendedTimeout = 10000; // 10 seconds
     
@@ -311,15 +367,10 @@ class P2PService {
       console.warn('⚠️ Discovery timeout or error:', error);
     }
 
-    console.log(`📊 Discovery complete. Connected to ${this.state.connectedPeers.size} peers`);
-    
     if (this.state.connectedPeers.size === 0) {
-      console.log('💡 No peers found. Try:');
-      console.log('   1. Open app in another browser tab/window');
-      console.log('   2. Open app on another device');
-      console.log('   3. Wait a few seconds and refresh');
+      console.log('💡 No peers found - waiting for other players to join');
     } else {
-      console.log(`✅ Successfully connected to peers: ${Array.from(this.state.connectedPeers.keys()).join(', ')}`);
+      console.log(`✅ Connected to ${this.state.connectedPeers.size} peer(s)`);
     }
   }
 
@@ -376,7 +427,7 @@ class P2PService {
       });
 
       conn.on('error', (error) => {
-        console.error(`❌ Connection error with ${conn.peer}:`, error);
+        // Suppress connection errors during discovery - they're expected
         clearTimeout(timeout);
         reject(error);
       });
@@ -403,7 +454,7 @@ class P2PService {
       peerConn.lastSeen = Date.now();
     }
 
-    console.log(`📥 Received ${message.type} from ${fromPeer}:`, message.payload);
+    // Message received and processed (log only for debugging)
 
     switch (message.type) {
       case 'VOTE':
@@ -425,9 +476,12 @@ class P2PService {
     // Send our current state to the requesting peer
     const peerConn = this.state.connectedPeers.get(fromPeer);
     if (peerConn) {
+      // Get current votes from the callback if available
+      const currentVotes = this.getCurrentStateCallback ? this.getCurrentStateCallback() : [];
+      
       const syncResponse: P2PSyncMessage = {
         type: 'SYNC_RESPONSE',
-        payload: { votes: [] }, // Will be populated by the caller
+        payload: { votes: currentVotes },
         timestamp: Date.now(),
         peerId: this.state.peerId,
         messageId: this.generateMessageId(),
@@ -435,6 +489,7 @@ class P2PService {
       };
 
       peerConn.connection.send(syncResponse);
+
     }
   }
 
@@ -479,6 +534,12 @@ class P2PService {
   }
 
   private async attemptReconnection(): Promise<void> {
+    // Don't reconnect if this was an intentional disconnect
+    if (this.isIntentionalDisconnect) {
+      console.log('⏹️ Skipping reconnection - intentional disconnect');
+      return;
+    }
+
     if (this.state.connectionAttempts >= this.config.reconnectAttempts) {
       console.error('❌ Max reconnection attempts reached');
       this.updateStatus('error');
@@ -490,7 +551,7 @@ class P2PService {
 
     setTimeout(async () => {
       try {
-        if (this.peer) {
+        if (this.peer && !this.isIntentionalDisconnect) {
           this.peer.reconnect();
         }
       } catch (error) {
@@ -500,8 +561,8 @@ class P2PService {
     }, this.config.reconnectDelay);
   }
 
-  private generateRoomId(pokemon1: string, pokemon2: string): string {
-    const sorted = [pokemon1, pokemon2].sort();
+  private generateRoomId(pokemon1Index: number, pokemon2Index: number): string {
+    const sorted = [pokemon1Index, pokemon2Index].sort((a, b) => a - b);
     return `battle_${sorted[0]}_vs_${sorted[1]}`;
   }
 
@@ -527,7 +588,7 @@ class P2PService {
   }
 
   private handlePeerError(error: any): void {
-    console.error('🔥 PeerJS Error Details:', error);
+    // console.error('🔥 PeerJS Error Details:', error);
     
     // Handle specific PeerJS error types
     if (error.type === 'network') {

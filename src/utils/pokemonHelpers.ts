@@ -47,21 +47,19 @@ export const transformPokemonData = (rawData: RawPokemonData): Pokemon => {
 };
 
 /**
- * Convert height from decimeters to feet and inches
+ * Convert height from decimeters to centimeters
  */
 export const formatHeight = (heightInDecimeters: number): string => {
-  const heightInInches = heightInDecimeters * 3.937; // 1 decimeter = 3.937 inches
-  const feet = Math.floor(heightInInches / 12);
-  const inches = Math.round(heightInInches % 12);
-  return `${feet}'${inches.toString().padStart(2, '0')}"`;
+  const heightInCentimeters = heightInDecimeters * 10; // 1 decimeter = 10 centimeters
+  return `${heightInCentimeters} cm`;
 };
 
 /**
- * Convert weight from hectograms to pounds
+ * Convert weight from hectograms to kilograms
  */
 export const formatWeight = (weightInHectograms: number): string => {
-  const weightInPounds = (weightInHectograms * 0.220462).toFixed(1);
-  return `${weightInPounds} lbs`;
+  const weightInKilograms = (weightInHectograms * 0.1).toFixed(1);
+  return `${weightInKilograms} kg`;
 };
 
 /**
@@ -95,34 +93,8 @@ export const getTypeColor = (type: string): string => {
 /**
  * Calculate stat percentage for visualization
  */
-export const calculateStatPercentage = (statValue: number, maxStat: number = 255): number => {
+export const calculateStatPercentage = (statValue: number, maxStat: number = 100): number => {
   return Math.min((statValue / maxStat) * 100, 100);
-};
-
-/**
- * Get random Pokemon names for "New Battle" feature
- */
-export const getRandomPokemonPair = (): { pokemon1: string; pokemon2: string } => {
-  const popularPokemon = [
-    'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'mew',
-    'lugia', 'ho-oh', 'rayquaza', 'dialga', 'palkia', 'giratina',
-    'arceus', 'reshiram', 'zekrom', 'kyurem', 'xerneas', 'yveltal',
-    'snorlax', 'dragonite', 'tyranitar', 'salamence', 'metagross',
-    'garchomp', 'lucario', 'zoroark', 'greninja', 'talonflame'
-  ];
-  
-  const shuffled = [...popularPokemon].sort(() => 0.5 - Math.random());
-  return {
-    pokemon1: shuffled[0],
-    pokemon2: shuffled[1],
-  };
-};
-
-/**
- * Validate Pokemon name format
- */
-export const isValidPokemonName = (name: string): boolean => {
-  return /^[a-zA-Z0-9-]+$/.test(name) && name.length > 0 && name.length < 50;
 };
 
 /**

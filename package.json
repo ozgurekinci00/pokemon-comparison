@@ -12,6 +12,7 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "framer-motion": "^12.23.12",
     "peerjs": "^1.5.5",
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
@@ -23,8 +24,11 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:local": "REACT_APP_ENVIRONMENT=development npm run build",
+    "build:production": "REACT_APP_ENVIRONMENT=production npm run build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "preview": "npx serve -s build -p 3000"
   },
   "eslintConfig": {
     "extends": [

@@ -11,26 +11,26 @@ interface UsePokemonDataState {
 }
 
 interface UsePokemonDataReturn extends UsePokemonDataState {
-  fetchPokemon: (name: string) => Promise<void>;
+  fetchPokemon: (index: number) => Promise<void>;
   clearError: () => void;
   refetch: () => Promise<void>;
 }
 
-export const usePokemonData = (initialName?: string): UsePokemonDataReturn => {
+export const usePokemonData = (initialIndex?: number): UsePokemonDataReturn => {
   const [state, setState] = useState<UsePokemonDataState>({
     pokemon: null,
     isLoading: false,
     error: null,
   });
 
-  const [currentName, setCurrentName] = useState<string | undefined>(initialName);
+  const [currentIndex, setCurrentIndex] = useState<number | undefined>(initialIndex);
 
-  const fetchPokemon = useCallback(async (name: string) => {
+  const fetchPokemon = useCallback(async (index: number) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
-    setCurrentName(name);
+    setCurrentIndex(index);
 
     try {
-      const pokemon = await pokemonApi.fetchPokemon(name);
+      const pokemon = await pokemonApi.fetchPokemonByIndex(index);
       setState({
         pokemon,
         isLoading: false,
@@ -50,17 +50,17 @@ export const usePokemonData = (initialName?: string): UsePokemonDataReturn => {
   }, []);
 
   const refetch = useCallback(async () => {
-    if (currentName) {
-      await fetchPokemon(currentName);
+    if (currentIndex) {
+      await fetchPokemon(currentIndex);
     }
-  }, [currentName, fetchPokemon]);
+  }, [currentIndex, fetchPokemon]);
 
-  // Auto-fetch on mount if initialName provided
+  // Auto-fetch on mount if initialIndex provided
   useEffect(() => {
-    if (initialName) {
-      fetchPokemon(initialName);
+    if (initialIndex) {
+      fetchPokemon(initialIndex);
     }
-  }, [initialName, fetchPokemon]);
+  }, [initialIndex, fetchPokemon]);
 
   return {
     ...state,
@@ -75,7 +75,7 @@ interface UseMultiplePokemonReturn {
   pokemon: Pokemon[];
   isLoading: boolean;
   error: string | null;
-  fetchMultiple: (names: string[]) => Promise<void>;
+  fetchMultiple: (indexes: number[]) => Promise<void>;
   clearError: () => void;
 }
 
@@ -84,12 +84,12 @@ export const useMultiplePokemon = (): UseMultiplePokemonReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchMultiple = useCallback(async (names: string[]) => {
+  const fetchMultiple = useCallback(async (indexes: number[]) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const results = await pokemonApi.fetchMultiplePokemon(names);
+      const results = await pokemonApi.fetchMultiplePokemon(indexes);
       setPokemon(results);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to fetch Pokemon');

@@ -19,6 +19,8 @@ interface BattleContextType {
   castVote: (pokemonName: string) => void;
   receiveVote: (vote: Vote) => void;
   resetBattle: () => void;
+  getCurrentVotes: () => Vote[];
+  syncVotes: (votes: Vote[]) => void;
 }
 
 // Initial state
@@ -54,20 +56,19 @@ const battleReducer = (state: BattleState, action: VotingAction): BattleState =>
 
     case 'CAST_VOTE': {
       const { pokemonName } = action.payload;
-      const sessionId = getUserSessionId();
+      const userId = getUserSessionId();
       
       // Check if user already voted
-      if (hasUserVoted(state.votes, sessionId, state.battleId)) {
+      if (hasUserVoted(state.votes, userId, state.battleId)) {
         return state;
       }
 
       const newVote: Vote = {
         id: `vote_${Date.now()}_${Math.random().toString(36).substring(2)}`,
-        userId: sessionId,
+        userId,
         pokemonName,
         battleId: state.battleId,
         timestamp: Date.now(),
-        sessionId,
       };
 
       const updatedVotes = [...state.votes, newVote];
@@ -87,10 +88,10 @@ const battleReducer = (state: BattleState, action: VotingAction): BattleState =>
 
     case 'RECEIVE_VOTE': {
       const vote = action.payload as Vote;
-      const sessionId = getUserSessionId();
+      const userId = getUserSessionId();
       
       // Don't add our own votes twice
-      if (vote.userId === sessionId) {
+      if (vote.userId === userId) {
         return state;
       }
 
@@ -119,10 +120,33 @@ const battleReducer = (state: BattleState, action: VotingAction): BattleState =>
       };
     }
 
+    case 'SYNC_VOTES': {
+      const incomingVotes = action.payload as Vote[];
+      
+      // Merge incoming votes with existing votes, avoiding duplicates
+      const existingVoteIds = new Set(state.votes.map(v => v.id));
+      const newVotes = incomingVotes.filter(vote => !existingVoteIds.has(vote.id));
+      const allVotes = [...state.votes, ...newVotes];
+      
+      // Recalculate results
+      const results = calculateVoteResults(allVotes);
+      const winner = determineWinner(results);
+      
+      console.log(`🔄 Synced ${newVotes.length} new votes (${allVotes.length} total)`);
+      
+      return {
+        ...state,
+        votes: allVotes,
+        results,
+        winner,
+        totalVotes: allVotes.length,
+      };
+    }
+
     case 'SET_USER_VOTE_STATUS': {
-      const sessionId = getUserSessionId();
-      const userHasVoted = hasUserVoted(state.votes, sessionId, state.battleId);
-      const userVote = getUserVote(state.votes, sessionId, state.battleId);
+      const userId = getUserSessionId();
+      const userHasVoted = hasUserVoted(state.votes, userId, state.battleId);
+      const userVote = getUserVote(state.votes, userId, state.battleId);
 
       return {
         ...state,
@@ -175,6 +199,17 @@ export const BattleProvider: React.FC<BattleProviderProps> = ({ children }) => {
     dispatch({ type: 'RESET_BATTLE' });
   };
 
+  const getCurrentVotes = (): Vote[] => {
+    return state.votes;
+  };
+
+  const syncVotes = (votes: Vote[]) => {
+    dispatch({
+      type: 'SYNC_VOTES',
+      payload: votes,
+    });
+  };
+
   // Update user vote status when votes change
   useEffect(() => {
     if (state.battleId) {
@@ -189,6 +224,8 @@ export const BattleProvider: React.FC<BattleProviderProps> = ({ children }) => {
     castVote,
     receiveVote,
     resetBattle,
+    getCurrentVotes,
+    syncVotes,
   };
 
   return (

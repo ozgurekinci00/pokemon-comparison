@@ -83,7 +83,6 @@ export const isValidVote = (vote: Partial<Vote>): vote is Vote => {
     vote.pokemonName &&
     vote.battleId &&
     vote.timestamp &&
-    vote.sessionId &&
     typeof vote.timestamp === 'number' &&
     vote.timestamp > 0
   );
@@ -107,16 +106,20 @@ export const generateSessionId = (): string => {
   return `session_${timestamp}_${randomStr}`;
 };
 
+// Single user ID per tab instance
+let tabUserId: string | null = null;
+
 /**
  * Get or create user session ID - each tab/instance gets unique ID for P2P testing
  */
 export const getUserSessionId = (): string => {
   // For P2P testing, each tab should be treated as a separate user
-  // Generate a unique session ID for this specific tab/instance
-  const sessionId = generateSessionId();
-  
-  console.log(`🆔 Generated unique session ID for this tab: ${sessionId}`);
-  return sessionId;
+  // Generate a unique session ID for this specific tab/instance once
+  if (!tabUserId) {
+    tabUserId = generateSessionId();
+    console.log(`🆔 Generated unique user ID for this tab: ${tabUserId}`);
+  }
+  return tabUserId;
 };
 
 /**
@@ -167,4 +170,131 @@ export const calculateBattleProgress = (startTime: number, durationMs: number): 
   const elapsed = Date.now() - startTime;
   const progress = (elapsed / durationMs) * 100;
   return Math.min(Math.max(progress, 0), 100);
+};
+
+// ===============================
+// BROWSER-WIDE VOTE TRACKING
+// ===============================
+
+interface BrowserVoteRecord {
+  battleId: string;
+  pokemonName: string;
+  timestamp: number;
+  userAgent: string; // For additional verification
+}
+
+const BROWSER_VOTES_KEY = 'pokemon_battle_browser_votes';
+const VOTE_EXPIRY_HOURS = 24; // Votes expire after 24 hours
+
+/**
+ * Generate battle ID from Pokemon indexes
+ */
+export const generateBattleId = (pokemon1Index: number, pokemon2Index: number): string => {
+  const sorted = [pokemon1Index, pokemon2Index].sort((a, b) => a - b);
+  return `battle_${sorted[0]}_vs_${sorted[1]}`;
+};
+
+/**
+ * Get all browser votes from localStorage
+ */
+const getBrowserVotes = (): BrowserVoteRecord[] => {
+  try {
+    const stored = localStorage.getItem(BROWSER_VOTES_KEY);
+    if (!stored) return [];
+    
+    const votes: BrowserVoteRecord[] = JSON.parse(stored);
+    const now = Date.now();
+    const expiryMs = VOTE_EXPIRY_HOURS * 60 * 60 * 1000;
+    
+    // Filter out expired votes
+    const validVotes = votes.filter(vote => 
+      now - vote.timestamp < expiryMs
+    );
+    
+    // Save back filtered votes if any were removed
+    if (validVotes.length !== votes.length) {
+      localStorage.setItem(BROWSER_VOTES_KEY, JSON.stringify(validVotes));
+    }
+    
+    return validVotes;
+  } catch (error) {
+    console.warn('Failed to read browser votes from localStorage:', error);
+    return [];
+  }
+};
+
+/**
+ * Save browser votes to localStorage
+ */
+const saveBrowserVotes = (votes: BrowserVoteRecord[]): void => {
+  try {
+    localStorage.setItem(BROWSER_VOTES_KEY, JSON.stringify(votes));
+  } catch (error) {
+    console.warn('Failed to save browser votes to localStorage:', error);
+  }
+};
+
+/**
+ * Check if user has already voted in this battle in ANY tab of this browser
+ */
+export const hasBrowserVotedInBattle = (battleId: string): boolean => {
+  const votes = getBrowserVotes();
+  return votes.some(vote => vote.battleId === battleId);
+};
+
+/**
+ * Get browser's vote for a specific battle
+ */
+export const getBrowserVoteForBattle = (battleId: string): BrowserVoteRecord | null => {
+  const votes = getBrowserVotes();
+  return votes.find(vote => vote.battleId === battleId) || null;
+};
+
+/**
+ * Record a vote for this browser (across all tabs)
+ */
+export const recordBrowserVote = (battleId: string, pokemonName: string): void => {
+  const votes = getBrowserVotes();
+  
+  // Remove any existing vote for this battle
+  const filteredVotes = votes.filter(vote => vote.battleId !== battleId);
+  
+  // Add new vote
+  const newVote: BrowserVoteRecord = {
+    battleId,
+    pokemonName,
+    timestamp: Date.now(),
+    userAgent: navigator.userAgent.substring(0, 100) // Truncate for storage
+  };
+  
+  filteredVotes.push(newVote);
+  saveBrowserVotes(filteredVotes);
+  
+  console.log(`🗳️ Recorded browser vote for ${battleId}: ${pokemonName}`);
+};
+
+/**
+ * Clear all browser votes (for testing or reset)
+ */
+export const clearBrowserVotes = (): void => {
+  try {
+    localStorage.removeItem(BROWSER_VOTES_KEY);
+    console.log('🗑️ Cleared all browser votes');
+  } catch (error) {
+    console.warn('Failed to clear browser votes:', error);
+  }
+};
+
+/**
+ * Get vote statistics for debugging
+ */
+export const getBrowserVoteStats = (): { totalVotes: number; battles: string[] } => {
+  const votes = getBrowserVotes();
+  const battleSet = new Set(votes.map(vote => vote.battleId));
+  const battles = Array.from(battleSet);
+  
+  return {
+    totalVotes: votes.length,
+    battles
+  };
 };

@@ -1,9 +1,10 @@
 // PokéAPI integration service
 
 import { RawPokemonData, Pokemon } from '../types/pokemon';
-import { transformPokemonData, isValidPokemonName } from '../utils/pokemonHelpers';
+import { transformPokemonData } from '../utils/pokemonHelpers';
+import { appConfig } from '../config/environment';
 
-const POKEAPI_BASE_URL = 'https://pokeapi.co/api/v2';
+const POKEAPI_BASE_URL = appConfig.pokemonApi.baseUrl;
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
 interface CachedPokemon {
@@ -15,26 +16,32 @@ class PokemonApiService {
   private cache = new Map<string, CachedPokemon>();
 
   /**
-   * Fetch Pokemon data by name
+   * Fetch Pokemon data by index (1-151 for Gen 1)
    */
-  async fetchPokemon(name: string): Promise<Pokemon> {
-    const normalizedName = name.toLowerCase().trim();
-    
-    if (!isValidPokemonName(normalizedName)) {
-      throw new Error(`Invalid Pokemon name: ${name}`);
+  async fetchPokemonByIndex(index: number): Promise<Pokemon> {
+    if (!this.isValidPokemonIndex(index)) {
+      throw new Error(`Invalid Pokemon index: ${index}. Must be between 1 and 151.`);
     }
 
+    return this.fetchPokemonByIdentifier(index);
+  }
+
+  /**
+   * Internal method to fetch Pokemon by index
+   */
+  private async fetchPokemonByIdentifier(index: number): Promise<Pokemon> {
+    const indexStr = index.toString();
     // Check cache first
-    const cached = this.getCachedPokemon(normalizedName);
+    const cached = this.getCachedPokemon(indexStr);
     if (cached) {
-      console.log(`📦 Using cached data for ${normalizedName}`);
+      console.log(`📦 Using cached data for Pokemon #${index}`);
       return cached;
     }
 
     try {
-      console.log(`🔍 Fetching ${normalizedName} from PokéAPI...`);
+      console.log(`🔍 Fetching Pokemon #${index} from PokéAPI...`);
       
-      const response = await fetch(`${POKEAPI_BASE_URL}/pokemon/${normalizedName}`, {
+      const response = await fetch(`${POKEAPI_BASE_URL}/pokemon/${index}`, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -43,7 +50,7 @@ class PokemonApiService {
 
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error(`Pokemon "${name}" not found`);
+          throw new Error(`Pokemon #${index} not found`);
         }
         throw new Error(`Failed to fetch Pokemon data: ${response.status} ${response.statusText}`);
       }
@@ -51,29 +58,31 @@ class PokemonApiService {
       const rawData: RawPokemonData = await response.json();
       const pokemon = transformPokemonData(rawData);
 
-      // Cache the result
-      this.setCachedPokemon(normalizedName, pokemon);
+      // Cache the result using the Pokemon's index as key
+      this.setCachedPokemon(indexStr, pokemon);
       
-      console.log(`✅ Successfully fetched ${pokemon.displayName}`);
+      console.log(`✅ Successfully fetched ${pokemon.displayName} (ID: ${pokemon.id})`);
       return pokemon;
 
     } catch (error) {
-      console.error(`❌ Error fetching Pokemon ${name}:`, error);
+      console.error(`❌ Error fetching Pokemon #${index}:`, error);
       
       // Try to return fallback data for demo purposes
-      if (normalizedName === 'bulbasaur' || normalizedName === 'pikachu') {
-        return this.getFallbackPokemon(normalizedName);
+      if (index === 1 || index === 25) {
+        return this.getFallbackPokemon(index);
       }
       
       throw error;
     }
   }
 
+
+
   /**
-   * Fetch multiple Pokemon concurrently
+   * Fetch multiple Pokemon concurrently by indexes
    */
-  async fetchMultiplePokemon(names: string[]): Promise<Pokemon[]> {
-    const promises = names.map(name => this.fetchPokemon(name));
+  async fetchMultiplePokemon(indexes: number[]): Promise<Pokemon[]> {
+    const promises = indexes.map(index => this.fetchPokemonByIndex(index));
     
     try {
       const results = await Promise.allSettled(promises);
@@ -85,7 +94,7 @@ class PokemonApiService {
         if (result.status === 'fulfilled') {
           pokemon.push(result.value);
         } else {
-          errors.push(`Failed to fetch ${names[index]}: ${result.reason.message}`);
+          errors.push(`Failed to fetch Pokemon #${indexes[index]}: ${result.reason.message}`);
         }
       });
 
@@ -102,10 +111,10 @@ class PokemonApiService {
   }
 
   /**
-   * Fetch Pokemon for default battle (Bulbasaur vs Pikachu)
+   * Fetch Pokemon for default battle (Bulbasaur vs Pikachu) using indexes
    */
   async fetchDefaultBattlePokemon(): Promise<{ pokemon1: Pokemon; pokemon2: Pokemon }> {
-    const [pokemon1, pokemon2] = await this.fetchMultiplePokemon(['bulbasaur', 'pikachu']);
+    const [pokemon1, pokemon2] = await this.fetchMultiplePokemon([1, 25]); // Bulbasaur (1) vs Pikachu (25)
     
     if (!pokemon1 || !pokemon2) {
       throw new Error('Failed to load default battle Pokemon');
@@ -115,26 +124,56 @@ class PokemonApiService {
   }
 
   /**
-   * Search Pokemon by partial name (for future autocomplete feature)
+   * Fetch two random Pokemon for a new battle
    */
-  async searchPokemon(query: string, limit: number = 10): Promise<string[]> {
-    try {
-      // This is a simplified search - in a real app, you might want to use a more sophisticated search
-      const response = await fetch(`${POKEAPI_BASE_URL}/pokemon?limit=1000`);
-      const data = await response.json();
-      
-      const matches = data.results
-        .filter((pokemon: any) => pokemon.name.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, limit)
-        .map((pokemon: any) => pokemon.name);
-      
-      return matches;
-
-    } catch (error) {
-      console.error('❌ Error searching Pokemon:', error);
-      return [];
+  async fetchRandomBattlePokemon(): Promise<{ pokemon1: Pokemon; pokemon2: Pokemon }> {
+    const { index1, index2 } = this.generateRandomPokemonPair();
+    console.log(`🎲 Generating random battle: Pokemon ${index1} vs Pokemon ${index2}`);
+    
+    const [pokemon1, pokemon2] = await this.fetchMultiplePokemon([index1, index2]);
+    
+    if (!pokemon1 || !pokemon2) {
+      throw new Error('Failed to load random battle Pokemon');
     }
+
+    return { pokemon1, pokemon2 };
   }
+
+  /**
+   * Fetch Pokemon for battle by specific indexes
+   */
+  async fetchBattlePokemon(pokemon1Index: number, pokemon2Index: number): Promise<{ pokemon1: Pokemon; pokemon2: Pokemon }> {
+    console.log(`⚔️ Loading battle: Pokemon ${pokemon1Index} vs Pokemon ${pokemon2Index}`);
+    
+    const [pokemon1, pokemon2] = await this.fetchMultiplePokemon([pokemon1Index, pokemon2Index]);
+    
+    if (!pokemon1 || !pokemon2) {
+      throw new Error(`Failed to load battle Pokemon ${pokemon1Index} vs ${pokemon2Index}`);
+    }
+
+    return { pokemon1, pokemon2 };
+  }
+
+  /**
+   * Generate two different random Pokemon indexes (1-151)
+   */
+  private generateRandomPokemonPair(): { index1: number; index2: number } {
+    const index1 = Math.floor(Math.random() * 151) + 1; // 1-151
+    let index2;
+    
+    // Ensure we get two different Pokemon
+    do {
+      index2 = Math.floor(Math.random() * 151) + 1;
+    } while (index2 === index1);
+
+    // Sort the indexes so that index1 is always less than index2
+    if (index1 < index2) {
+      return { index1, index2 };
+    }
+    return { index1: index2, index2: index1 };
+  }
+
+
 
   /**
    * Clear cache
@@ -155,30 +194,37 @@ class PokemonApiService {
   }
 
   /**
+   * Validate Pokemon index (1-151 for Generation 1)
+   */
+  private isValidPokemonIndex(index: number): boolean {
+    return Number.isInteger(index) && index >= 1 && index <= 151;
+  }
+
+  /**
    * Private helper methods
    */
-  private getCachedPokemon(name: string): Pokemon | null {
-    const cached = this.cache.get(name);
+  private getCachedPokemon(indexStr: string): Pokemon | null {
+    const cached = this.cache.get(indexStr);
     
     if (!cached) return null;
     
     const isExpired = Date.now() - cached.timestamp > CACHE_DURATION;
     if (isExpired) {
-      this.cache.delete(name);
+      this.cache.delete(indexStr);
       return null;
     }
     
     return cached.data;
   }
 
-  private setCachedPokemon(name: string, pokemon: Pokemon): void {
-    this.cache.set(name, {
+  private setCachedPokemon(indexStr: string, pokemon: Pokemon): void {
+    this.cache.set(indexStr, {
       data: pokemon,
       timestamp: Date.now(),
     });
   }
 
-  private getFallbackPokemon(name: string): Pokemon {
+  private getFallbackPokemon(index: number): Pokemon {
     const fallbackData = {
       bulbasaur: {
         id: 1,
@@ -218,12 +264,22 @@ class PokemonApiService {
       },
     };
 
-    const pokemon = fallbackData[name as keyof typeof fallbackData];
-    if (!pokemon) {
-      throw new Error(`No fallback data for ${name}`);
+    // Handle index identifiers
+    let pokemonKey: string;
+    if (index === 1) {
+      pokemonKey = 'bulbasaur';
+    } else if (index === 25) {
+      pokemonKey = 'pikachu';
+    } else {
+      throw new Error(`No fallback data for Pokemon #${index}`);
     }
 
-    console.log(`🔄 Using fallback data for ${name}`);
+    const pokemon = fallbackData[pokemonKey as keyof typeof fallbackData];
+    if (!pokemon) {
+      throw new Error(`No fallback data for Pokemon #${index}`);
+    }
+
+    console.log(`🔄 Using fallback data for Pokemon #${index} (${pokemon.displayName})`);
     return pokemon;
   }
 }

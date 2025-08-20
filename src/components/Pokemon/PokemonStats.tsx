@@ -13,7 +13,7 @@ interface PokemonStatsProps {
 const PokemonStats: React.FC<PokemonStatsProps> = ({ 
   stats, 
   showLabels = true, 
-  maxStatValue = 255 
+  maxStatValue = 100 
 }) => {
   const statEntries = Object.entries(stats) as Array<[keyof Pokemon['stats'], number]>;
 
@@ -44,7 +44,7 @@ const PokemonStats: React.FC<PokemonStatsProps> = ({
           return (
             <div key={statName} className="flex items-center">
               {/* Stat Name */}
-              <div className="w-16 text-xs text-gray-600 font-medium">
+              <div className="w-20 text-xs text-gray-600 font-medium">
                 {displayName}
               </div>
               
@@ -63,16 +63,6 @@ const PokemonStats: React.FC<PokemonStatsProps> = ({
             </div>
           );
         })}
-      </div>
-      
-      {/* Total Base Stat */}
-      <div className="pt-2 border-t border-gray-200">
-        <div className="flex justify-between items-center text-sm">
-          <span className="font-medium text-gray-700">Total</span>
-          <span className="font-bold text-gray-900">
-            {Object.values(stats).reduce((sum, stat) => sum + stat, 0)}
-          </span>
-        </div>
       </div>
     </div>
   );

@@ -10,10 +10,12 @@ interface UseP2PReturn {
   connectedPeersCount: number;
   status: P2PStatus;
   isConnected: boolean;
-  initialize: (pokemon1: string, pokemon2: string) => Promise<void>;
+  initialize: (pokemon1Index: number, pokemon2Index: number) => Promise<void>;
+  reinitialize: (pokemon1Index: number, pokemon2Index: number) => Promise<void>;
   broadcastVote: (pokemonName: string, userId: string) => Promise<void>;
   disconnect: () => void;
   requestSync: () => Promise<void>;
+  sendStateToPeer: (peerId: string, votes: any[]) => Promise<void>;
 }
 
 export const useP2P = (): UseP2PReturn => {
@@ -31,19 +33,43 @@ export const useP2P = (): UseP2PReturn => {
   }, []);
 
   // Initialize P2P service
-  const initialize = useCallback(async (pokemon1: string, pokemon2: string) => {
+  const initialize = useCallback(async (pokemon1Index: number, pokemon2Index: number) => {
     if (isInitialized.current) {
       console.log('⚠️ P2P already initialized, skipping...');
       return;
     }
 
     try {
-      console.log('🚀 Initializing P2P connection...');
-      await p2pService.initialize(pokemon1, pokemon2);
+      console.log(`🚀 Initializing P2P connection for battle ${pokemon1Index} vs ${pokemon2Index}...`);
+      await p2pService.initialize(pokemon1Index, pokemon2Index);
       isInitialized.current = true;
       updateConnectionState();
     } catch (error) {
       console.error('❌ Failed to initialize P2P:', error);
+    }
+  }, [updateConnectionState]);
+
+  // Reinitialize P2P service with new Pokemon (for New Battle)
+  const reinitialize = useCallback(async (pokemon1Index: number, pokemon2Index: number) => {
+    try {
+      console.log(`🔄 Reinitializing P2P for new battle ${pokemon1Index} vs ${pokemon2Index}...`);
+      
+      // First disconnect from current session
+      p2pService.disconnect();
+      isInitialized.current = false;
+      updateConnectionState();
+      
+      // Wait a moment for cleanup
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Initialize new session
+      await p2pService.initialize(pokemon1Index, pokemon2Index);
+      isInitialized.current = true;
+      updateConnectionState();
+      
+      console.log(`✅ P2P reinitialized successfully for battle ${pokemon1Index} vs ${pokemon2Index}`);
+    } catch (error) {
+      console.error('❌ Failed to reinitialize P2P:', error);
     }
   }, [updateConnectionState]);
 
@@ -67,6 +93,14 @@ export const useP2P = (): UseP2PReturn => {
     }
   }, []);
 
+  const sendStateToPeer = useCallback(async (peerId: string, votes: any[]) => {
+    try {
+      await p2pService.sendStateToPeer(peerId, votes);
+    } catch (error) {
+      console.error('❌ Failed to send state to peer:', error);
+    }
+  }, []);
+
   // Disconnect from all peers
   const disconnect = useCallback(() => {
     p2pService.disconnect();
@@ -86,8 +120,7 @@ export const useP2P = (): UseP2PReturn => {
         userId: voteData.userId,
         pokemonName: voteData.pokemonName,
         battleId: connectionState.roomId,
-        timestamp: voteData.timestamp,
-        sessionId: voteData.userId, // Use userId as sessionId for P2P votes
+        timestamp: voteData.timestamp
       };
       
       receiveVote(vote);
@@ -121,7 +154,11 @@ export const useP2P = (): UseP2PReturn => {
     // Handle sync responses
     p2pService.onSyncReceived((syncData) => {
       console.log('🔄 Received sync data:', syncData);
-      // TODO: Process sync data if needed
+      if (syncData.votes && syncData.votes.length > 0) {
+        // Sync data will be handled by BattleArena component
+        // This is just logging for now
+        console.log(`📥 Received ${syncData.votes.length} votes from peer`);
+      }
     });
 
     // Cleanup function
@@ -145,8 +182,10 @@ export const useP2P = (): UseP2PReturn => {
     status,
     isConnected: status === 'connected',
     initialize,
+    reinitialize,
     broadcastVote,
     disconnect,
     requestSync,
+    sendStateToPeer,
   };
 };
